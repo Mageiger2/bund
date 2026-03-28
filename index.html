@@ -1,0 +1,990 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bundesländer & Regierungsbezirke</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- D3.js für das Zeichnen der echten geografischen Karten -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@0.344.0/dist/umd/lucide.min.js"></script>
+
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&display=swap" rel="stylesheet">
+    
+    <style>
+        body { font-family: 'Nunito', sans-serif; background-color: #f8fafc; }
+        
+        /* Karten Styling */
+        svg { filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.05)); }
+        .state-path {
+            fill: #f1f5f9; stroke: #cbd5e1; stroke-width: 1.5; 
+            stroke-linejoin: round; stroke-linecap: round;
+            transition: all 0.3s ease; cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .state-path:hover { fill: #e2e8f0; }
+        
+        .state-path.highlight-question { fill: #fef08a; stroke: #facc15; stroke-width: 2.5; }
+        .state-path.highlight-correct { fill: #bbf7d0 !important; stroke: #4ade80 !important; stroke-width: 2.5; }
+        .state-path.highlight-wrong { fill: #fecaca; stroke: #f87171; stroke-width: 2.5; }
+        .state-path.highlight-hint { fill: #e2e8f0; }
+        .state-path.highlight-wrong-click { fill: #cbd5e1 !important; stroke: #94a3b8 !important; opacity: 0.6; cursor: not-allowed; }
+        
+        .capital-dot {
+            fill: #f87171; stroke: #ffffff; stroke-width: 2; opacity: 0;
+            transition: opacity 0.3s ease; transform-box: fill-box; transform-origin: center;
+        }
+        .capital-dot.show { opacity: 1; animation: pulseDot 1.5s infinite ease-in-out; }
+
+        @keyframes pulseDot {
+            0% { transform: scale(1); filter: drop-shadow(0 0 0px rgba(248, 113, 113, 0.5)); }
+            50% { transform: scale(1.6); filter: drop-shadow(0 0 8px rgba(248, 113, 113, 0.8)); }
+            100% { transform: scale(1); filter: drop-shadow(0 0 0px rgba(248, 113, 113, 0.5)); }
+        }
+
+        .btn-hover { transition: transform 0.1s ease, box-shadow 0.1s ease; }
+        .btn-hover:active:not(:disabled) { transform: scale(0.95); }
+        .hidden { display: none !important; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        /* Streak Animation */
+        .reward-anim { animation: rewardPop 2.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+        @keyframes rewardPop {
+            0% { transform: scale(0); opacity: 0; }
+            15% { transform: scale(1.2) rotate(-10deg); opacity: 1; }
+            30% { transform: scale(1) rotate(10deg); }
+            45% { transform: scale(1.1) rotate(-5deg); }
+            85% { transform: scale(1) rotate(0); opacity: 1; }
+            100% { transform: scale(0); opacity: 0; }
+        }
+        .reward-text-anim { animation: textSlideUp 2.5s ease-in-out forwards; }
+        @keyframes textSlideUp {
+            0% { transform: translateY(50px); opacity: 0; }
+            15% { transform: translateY(0); opacity: 1; }
+            85% { transform: translateY(0); opacity: 1; }
+            100% { transform: translateY(-50px); opacity: 0; }
+        }
+
+        #progress-bar { transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+    </style>
+</head>
+<body class="min-h-screen text-slate-700 flex flex-col items-center overflow-x-hidden w-full relative">
+
+    <!-- Belohnungs-Overlay -->
+    <div id="reward-overlay" class="hidden fixed inset-0 z-[60] flex flex-col items-center justify-center pointer-events-none bg-white/60 backdrop-blur-sm">
+        <div id="reward-icon" class="text-[150px] md:text-[250px] drop-shadow-2xl">🌟</div>
+        <div id="reward-text" class="text-3xl md:text-5xl font-black text-amber-500 drop-shadow-xl mt-6 text-center px-4 leading-tight"></div>
+    </div>
+
+    <!-- ================= HEADER (Schulamt / BdB) ================= -->
+    <header class="bg-sky-200 text-sky-900 pt-6 pb-6 shadow-md rounded-b-3xl mb-6 relative shrink-0 w-full z-10">
+        <div class="max-w-6xl mx-auto px-4 w-full">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+                
+                <!-- Logo Links -->
+                <div class="flex justify-center md:justify-start order-2 md:order-1">
+                    <img src="Logo_Schulamt_Dachau.png" alt="Schulamt Dachau Logo" class="h-10 md:h-12 lg:h-14 object-contain drop-shadow-md">
+                </div>
+                
+                <!-- Titel Mittig -->
+                <div class="text-center order-1 md:order-2">
+                    <h1 class="text-2xl md:text-3xl lg:text-4xl font-black flex justify-center text-center items-center gap-3">
+                        <i data-lucide="map" class="w-8 h-8 md:w-10 md:h-10 shrink-0 text-sky-700"></i>
+                        <span class="leading-tight text-sky-800">Bundesländer &<br>Regierungsbezirke</span>
+                    </h1>
+                </div>
+                
+                <!-- Logo Rechts -->
+                <div class="flex justify-center md:justify-end order-3 md:order-3">
+                    <img src="logo_bdb.png" alt="BdB Logo" class="h-10 md:h-12 lg:h-14 object-contain drop-shadow-md">
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- ================= HAUPT-APP BEREICH ================= -->
+    <main class="flex-1 w-full flex flex-col items-center px-4 md:px-8 pb-10">
+        
+        <!-- ================= STARTBILDSCHIRM ================= -->
+        <div id="start-screen" class="w-full max-w-5xl text-center bg-white rounded-3xl shadow-xl border border-slate-100 p-8 md:p-10">
+            <h2 class="text-3xl md:text-4xl font-black text-sky-500 mb-2">Wähle deine Karte!</h2>
+            <p class="text-lg md:text-xl text-slate-500 mb-8 font-bold">Klicke auf den Modus, den du spielen willst.</p>
+            
+            <div id="loading-indicator" class="flex flex-col items-center justify-center space-y-4 my-10">
+                <div class="w-16 h-16 border-8 border-sky-100 border-t-sky-400 rounded-full animate-spin"></div>
+                <p class="text-xl text-sky-500 font-bold">Lade echte Kartendaten aus dem CDN...</p>
+            </div>
+
+            <div id="start-cards" class="w-full flex flex-col md:flex-row gap-8 hidden text-left">
+                <!-- Deutschland -->
+                <div class="flex-1 bg-sky-50 rounded-3xl p-6 md:p-8 shadow-sm border-2 border-sky-100 flex flex-col items-center text-center min-w-0">
+                    <!-- Offizielle Wikimedia SVG für Deutschland -->
+                    <img src="https://upload.wikimedia.org/wikipedia/en/b/ba/Flag_of_Germany.svg" alt="Deutschland Flagge" class="w-24 h-16 object-cover mx-auto mb-4 rounded shadow-md border border-slate-200">
+                    
+                    <h2 class="text-3xl font-black text-sky-600 mb-1">Deutschland</h2>
+                    <p class="text-base font-bold text-sky-400 mb-8">Bundesländer & Hauptstädte</p>
+                    
+                    <div class="space-y-4 w-full max-w-sm">
+                        <button onclick="showModeSelection('deutschland', 'lernen')" class="btn-hover w-full bg-[#e9d5ff] hover:bg-[#d8b4fe] text-[#4c1d95] text-xl font-black py-3 px-6 rounded-2xl shadow-sm border-b-4 border-[#c084fc]">Lernen</button>
+                        <button onclick="showModeSelection('deutschland', 'leicht')" class="btn-hover w-full bg-[#a7f3d0] hover:bg-[#6ee7b7] text-[#064e3b] text-xl font-black py-3 px-6 rounded-2xl shadow-sm border-b-4 border-[#34d399]">Leicht</button>
+                        <button onclick="showModeSelection('deutschland', 'mittel')" class="btn-hover w-full bg-[#fde68a] hover:bg-[#fcd34d] text-[#78350f] text-xl font-black py-3 px-6 rounded-2xl shadow-sm border-b-4 border-[#fbbf24]">Mittel</button>
+                        <button onclick="showModeSelection('deutschland', 'schwer')" class="btn-hover w-full bg-[#fecaca] hover:bg-[#fca5a5] text-[#7f1d1d] text-xl font-black py-3 px-6 rounded-2xl shadow-sm border-b-4 border-[#f87171]">Schwer</button>
+                    </div>
+                </div>
+
+                <!-- Bayern -->
+                <div class="flex-1 bg-blue-50 rounded-3xl p-6 md:p-8 shadow-sm border-2 border-blue-100 flex flex-col items-center text-center min-w-0">
+                    <!-- Offizielle Wikimedia SVG für Bayern (Rautenflagge) -->
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/2/20/Flag_of_Bavaria_%28lozengy%29.svg" alt="Bayern Flagge" class="w-24 h-16 object-cover mx-auto mb-4 rounded shadow-md border border-slate-200">
+                    
+                    <h2 class="text-3xl font-black text-blue-600 mb-1">Bayern</h2>
+                    <p class="text-base font-bold text-blue-400 mb-8">Regierungsbezirke & Hauptstädte</p>
+                    
+                    <div class="space-y-4 w-full max-w-sm">
+                        <button onclick="showModeSelection('bayern', 'lernen')" class="btn-hover w-full bg-[#e9d5ff] hover:bg-[#d8b4fe] text-[#4c1d95] text-xl font-black py-3 px-6 rounded-2xl shadow-sm border-b-4 border-[#c084fc]">Lernen</button>
+                        <button onclick="showModeSelection('bayern', 'leicht')" class="btn-hover w-full bg-[#a7f3d0] hover:bg-[#6ee7b7] text-[#064e3b] text-xl font-black py-3 px-6 rounded-2xl shadow-sm border-b-4 border-[#34d399]">Leicht</button>
+                        <button onclick="showModeSelection('bayern', 'mittel')" class="btn-hover w-full bg-[#fde68a] hover:bg-[#fcd34d] text-[#78350f] text-xl font-black py-3 px-6 rounded-2xl shadow-sm border-b-4 border-[#fbbf24]">Mittel</button>
+                        <button onclick="showModeSelection('bayern', 'schwer')" class="btn-hover w-full bg-[#fecaca] hover:bg-[#fca5a5] text-[#7f1d1d] text-xl font-black py-3 px-6 rounded-2xl shadow-sm border-b-4 border-[#f87171]">Schwer</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= MODUS AUSWAHL ================= -->
+        <div id="mode-selection-screen" class="w-full max-w-2xl hidden text-center bg-white rounded-3xl shadow-xl border border-slate-100 p-10 mt-4 md:mt-10">
+            <h2 class="text-3xl md:text-4xl font-black text-sky-500 mb-4">Wie möchtest du spielen?</h2>
+            <p class="text-xl text-slate-500 mb-8 font-bold">Wähle deine Spieldauer</p>
+            
+            <div class="space-y-4 max-w-md mx-auto">
+                <button onclick="startGame('schnell')" class="btn-hover w-full bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-2xl font-black py-5 px-8 rounded-2xl shadow-sm border-b-4 border-indigo-300">
+                    Schnelles Spiel <br><span class="text-sm opacity-80">12 Fragen am Stück</span>
+                </button>
+                <button onclick="startGame('endlos')" class="btn-hover w-full bg-orange-100 hover:bg-orange-200 text-orange-700 text-2xl font-black py-5 px-8 rounded-2xl shadow-sm border-b-4 border-orange-300">
+                    Marathon <br><span class="text-sm opacity-80">Endloser Spielspaß</span>
+                </button>
+            </div>
+            <button onclick="showScreen('start-screen')" class="mt-8 text-slate-400 hover:text-rose-400 font-bold underline">Zurück zur Kartenwahl</button>
+        </div>
+
+        <!-- ================= SPIELBILDSCHIRM ================= -->
+        <div id="game-screen" class="w-full max-w-6xl hidden flex-col">
+            
+            <!-- Fortschrittsbalken -->
+            <div id="progress-bar-container" class="w-full bg-slate-100 h-3 rounded-full mb-4 hidden overflow-hidden shadow-inner border border-slate-200 shrink-0">
+                <div id="progress-bar" class="bg-emerald-400 h-3 w-0"></div>
+            </div>
+
+            <div class="flex justify-between items-center bg-white rounded-2xl shadow-sm border border-slate-100 p-4 mb-6 shrink-0">
+                <div id="header-left" class="text-lg md:text-xl font-black text-sky-500">Frage <span id="question-counter">1</span></div>
+                <div id="header-right" class="text-lg md:text-xl font-black text-emerald-500 flex items-center gap-2">
+                    Punkte: <span id="score">0</span>
+                    <span id="streak-indicator" class="text-sm bg-orange-100 text-orange-600 px-2 py-1 rounded-full hidden">🔥 <span id="streak-count">2</span></span>
+                </div>
+                <button id="end-button" onclick="endGame()" class="text-slate-400 hover:text-rose-400 font-bold transition-colors">Beenden</button>
+            </div>
+
+            <div class="flex flex-col md:flex-row gap-8 w-full">
+                <!-- Linke Seite: Karte -->
+                <div id="map-container" class="w-full md:w-1/2 bg-white rounded-3xl shadow-sm border border-slate-100 p-4 flex justify-center items-center relative overflow-hidden shrink-0 min-h-[300px]">
+                    <!-- SVG wird hier injiziert -->
+                </div>
+
+                <!-- Rechte Seite: Frage & Antwort -->
+                <div class="w-full md:w-1/2 flex flex-col justify-center min-w-0">
+                    
+                    <div id="feedback-box" class="hidden mb-6 p-5 rounded-2xl text-center text-xl font-black shadow-sm w-full">
+                        <!-- Platzhalter für Feedback -->
+                    </div>
+
+                    <div class="bg-white rounded-3xl shadow-sm border border-slate-100 p-6 md:p-10 text-center relative w-full">
+                        <h2 id="question-text" class="text-2xl md:text-3xl font-black text-slate-700 mb-8 leading-snug">
+                            Welches Bundesland ist das?
+                        </h2>
+
+                        <!-- Antwortbereich Multiple Choice -->
+                        <div id="multiple-choice-container" class="grid gap-3 w-full">
+                            <!-- Buttons -->
+                        </div>
+
+                        <!-- Antwortbereich Schwer -->
+                        <div id="text-input-container" class="hidden flex flex-col items-center gap-4 w-full">
+                            <!-- Lösungshilfe -->
+                            <div id="helper-text" class="text-xl md:text-2xl tracking-widest text-slate-400 font-mono mb-2 font-bold h-8 flex justify-center w-full truncate"></div>
+                            
+                            <input type="text" id="text-answer" placeholder="Deine Antwort..." autocomplete="off"
+                                   class="w-full text-2xl p-4 border-4 border-slate-100 bg-slate-50 rounded-2xl focus:outline-none focus:border-sky-300 focus:bg-white text-center font-bold text-slate-700 transition-all" style="-webkit-appearance: none;">
+                            <button onclick="checkTextAnswer()" class="btn-hover w-full bg-[#bae6fd] hover:bg-[#7dd3fc] text-[#0c4a6e] text-2xl font-black py-4 px-8 rounded-2xl shadow-sm border-b-4 border-[#38bdf8]">
+                                Antworten
+                            </button>
+                        </div>
+
+                        <!-- Lösungs-Button -->
+                        <div id="solution-button-container" class="mt-6 hidden w-full">
+                            <p class="text-slate-500 font-bold mb-2">Weißt du es nicht?</p>
+                            <button onclick="showSolution()" class="bg-slate-200 hover:bg-slate-300 text-slate-600 font-bold py-2 px-6 rounded-xl transition-colors">
+                                Lösung anzeigen
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= ERGEBNISBILDSCHIRM ================= -->
+        <div id="result-screen" class="w-full max-w-2xl hidden text-center bg-white rounded-3xl shadow-xl border border-slate-100 p-10 mt-10">
+            <div id="result-icon" class="text-6xl mb-6">🏆</div>
+            <h1 class="text-4xl md:text-5xl font-black text-sky-500 mb-4">Quiz beendet!</h1>
+            <p class="text-2xl text-slate-600 mb-8">Du hast <span id="final-score" class="font-black text-emerald-500 text-4xl">0</span> Punkte gesammelt.</p>
+            
+            <p id="result-message" class="text-xl font-bold text-amber-500 mb-10">
+                Tolles Training!
+            </p>
+
+            <button onclick="showScreen('start-screen')" class="btn-hover bg-[#bae6fd] hover:bg-[#7dd3fc] text-[#0c4a6e] text-2xl font-black py-4 px-10 rounded-2xl shadow-sm border-b-4 border-[#38bdf8] inline-block">
+                Neues Spiel starten
+            </button>
+        </div>
+
+    </main>
+
+    <!-- ================= FOOTER ================= -->
+    <footer class="bg-white border-t border-slate-200 mt-auto py-10 shrink-0 w-full z-10 relative">
+        <div class="max-w-4xl mx-auto px-4 w-full">
+            <div class="flex flex-col items-center mb-10 text-center">
+                
+                <h3 class="text-slate-700 font-bold mb-4 text-lg">Kontakt & Infos</h3>
+                <a href="mailto:martin.geiger@ms-dachau-sued.de" class="inline-flex items-center gap-2 bg-sky-100 text-sky-800 px-6 py-3 rounded-xl hover:brightness-95 transition font-bold shadow-sm mb-3">
+                    <i data-lucide="mail" class="w-5 h-5 shrink-0"></i> E-Mail schreiben
+                </a>
+                <p class="text-xs text-slate-400 max-w-md mb-6">Hinweis: Diese App ist für den Einsatz an bayerischen Schulen entwickelt. Externe Geodaten können leichten Abweichungen unterliegen.</p>
+                
+                <!-- Tracker hit.sh -->
+                <div class="opacity-70 hover:opacity-100 transition-opacity">
+                    <a href="https://hits.sh/ms-dachau-sued.de/geoquiz/" target="_blank" rel="noopener noreferrer" aria-label="Besucherstatistik">
+                        <img alt="Besucherzähler" src="https://hits.sh/ms-dachau-sued.de/geoquiz.svg?style=flat-square&color=38bdf8"/>
+                    </a>
+                </div>
+            </div>
+            
+            <div class="flex flex-col sm:flex-row justify-between items-center gap-4 text-slate-500 text-sm border-t border-slate-100 pt-6 w-full">
+                <div class="order-2 sm:order-1 font-medium shrink-0">&copy; 2026 - Martin Geiger</div>
+                <div class="flex flex-wrap justify-center gap-6 font-medium order-1 sm:order-2">
+                    <button onclick="openLegalModal('impressum')" class="hover:text-sky-600 transition flex items-center gap-1.5 whitespace-nowrap"><i data-lucide="info" class="w-4 h-4 shrink-0"></i> Impressum</button>
+                    <button onclick="openLegalModal('datenschutz')" class="hover:text-sky-600 transition flex items-center gap-1.5 whitespace-nowrap"><i data-lucide="shield-check" class="w-4 h-4 shrink-0"></i> Datenschutz</button>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- ================= LEGAL MODAL ================= -->
+    <div id="legal-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 sm:p-6">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col relative overflow-hidden">
+            <div class="bg-sky-100 p-6 border-b border-sky-200 flex justify-between items-center shrink-0 w-full">
+                <h2 id="legal-modal-title" class="text-2xl font-bold text-slate-800 min-w-0 truncate">Titel</h2>
+                <button id="close-legal-btn" class="bg-white p-2 rounded-full shadow-sm hover:bg-slate-50 text-slate-500 transition shrink-0 ml-4 flex items-center justify-center" aria-label="Schließen">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6 shrink-0"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div id="legal-modal-content" class="p-8 overflow-y-auto no-scrollbar flex-1 bg-white text-slate-700 min-h-0 w-full leading-relaxed"></div>
+        </div>
+    </div>
+
+    <!-- ================= JAVASCRIPT LOGIK ================= -->
+    <script>
+        // Icons initialisieren
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+
+        // --- SAUBERE DATENSTRUKTUR ---
+        const deData = [
+            { id: "BW", name: "Baden-Württemberg", capital: "Stuttgart", coords: [9.1829, 48.7758], isCityState: false },
+            { id: "BY", name: "Bayern", capital: "München", coords: [11.5820, 48.1351], isCityState: false },
+            { id: "BE", name: "Berlin", capital: "Berlin", coords: [13.4050, 52.5200], isCityState: true },
+            { id: "BB", name: "Brandenburg", capital: "Potsdam", coords: [13.0645, 52.3906], isCityState: false },
+            { id: "HB", name: "Bremen", capital: "Bremen", coords: [8.8017, 53.0793], isCityState: true },
+            { id: "HH", name: "Hamburg", capital: "Hamburg", coords: [9.9937, 53.5511], isCityState: true },
+            { id: "HE", name: "Hessen", capital: "Wiesbaden", coords: [8.2398, 50.0782], isCityState: false },
+            { id: "MV", name: "Mecklenburg-Vorpommern", capital: "Schwerin", coords: [11.4012, 53.6336], isCityState: false },
+            { id: "NI", name: "Niedersachsen", capital: "Hannover", coords: [9.7320, 52.3759], isCityState: false },
+            { id: "NW", name: "Nordrhein-Westfalen", capital: "Düsseldorf", coords: [6.7735, 51.2277], isCityState: false },
+            { id: "RP", name: "Rheinland-Pfalz", capital: "Mainz", coords: [8.2473, 49.9929], isCityState: false },
+            { id: "SL", name: "Saarland", capital: "Saarbrücken", coords: [6.9916, 49.2402], isCityState: false },
+            { id: "SN", name: "Sachsen", capital: "Dresden", coords: [13.7373, 51.0504], isCityState: false },
+            { id: "ST", name: "Sachsen-Anhalt", capital: "Magdeburg", coords: [11.6276, 52.1205], isCityState: false },
+            { id: "SH", name: "Schleswig-Holstein", capital: "Kiel", coords: [10.1228, 54.3233], isCityState: false },
+            { id: "TH", name: "Thüringen", capital: "Erfurt", coords: [11.0299, 50.9741], isCityState: false }
+        ];
+
+        const byData = [
+            { id: "OB", name: "Oberbayern", capital: "München", coords: [11.5820, 48.1351], isCityState: false },
+            { id: "NB", name: "Niederbayern", capital: "Landshut", coords: [12.1522, 48.5436], isCityState: false },
+            { id: "OP", name: "Oberpfalz", capital: "Regensburg", coords: [12.0974, 49.0134], isCityState: false },
+            { id: "OF", name: "Oberfranken", capital: "Bayreuth", coords: [11.5722, 49.9456], isCityState: false },
+            { id: "MF", name: "Mittelfranken", capital: "Ansbach", coords: [10.5716, 49.3008], isCityState: false },
+            { id: "UF", name: "Unterfranken", capital: "Würzburg", coords: [9.9317, 49.7939], isCityState: false },
+            { id: "SW", name: "Schwaben", capital: "Augsburg", coords: [10.8978, 48.3715], isCityState: false }
+        ];
+
+        // --- GLOBALE VARIABLEN ---
+        let geoJsonDE = null;
+        let geoJsonBY = null;
+        
+        let tempQuizType = '';
+        let tempDifficulty = '';
+        let currentQuizType = 'deutschland';
+        let currentDifficulty = 'leicht';
+        let currentGameMode = 'endlos'; 
+        let activeData = [];
+
+        let currentQuestionIndex = 0;
+        let score = 0;
+        let currentQuestion = null;
+        let isWaitingForNext = false; 
+        
+        let hasAttempted = false;
+        let currentStreak = 0;
+        let lernenTimeout = null;
+        let isMapClickMode = false;
+
+        let statePool = [];
+        let capitalPool = [];
+        let solvedQuestions = new Set(); 
+
+        // --- AUDIO SYNTHESIZER ---
+        let audioCtx = null;
+        function initAudio() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+        }
+
+        function playSound(type) {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            
+            if(type === 'correct') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(523.25, audioCtx.currentTime); 
+                osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.3);
+            } else if (type === 'wrong') {
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(250, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(150, audioCtx.currentTime + 0.2);
+                gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.2);
+            }
+        }
+
+        // ================= KARTEN LADEN =================
+        async function preloadMaps() {
+            try {
+                const resDE = await fetch('https://cdn.jsdelivr.net/gh/isellsoap/deutschlandGeoJSON@main/2_bundeslaender/3_mittel.geo.json');
+                geoJsonDE = await resDE.json();
+                
+                const resRB = await fetch('https://cdn.jsdelivr.net/gh/isellsoap/deutschlandGeoJSON@main/3_regierungsbezirke/3_mittel.geo.json');
+                const geoJsonRB = await resRB.json();
+                
+                const byNames = byData.map(s => s.name);
+                geoJsonBY = {
+                    type: "FeatureCollection",
+                    features: geoJsonRB.features.filter(f => {
+                        const nameStr = String(f.properties.NAME_1 || f.properties.NAME_2 || f.properties.name || "");
+                        return byNames.some(n => nameStr.includes(n));
+                    })
+                };
+                
+                document.getElementById('loading-indicator').classList.add('hidden');
+                document.getElementById('start-cards').classList.remove('hidden');
+            } catch (error) {
+                console.error("Kartenfehler:", error);
+                document.getElementById('loading-indicator').innerHTML = '<p class="text-rose-500 font-bold">Fehler beim Laden. Bitte Internetverbindung prüfen.</p>';
+            }
+        }
+
+        window.onload = preloadMaps;
+
+        // ================= KARTE ZEICHNEN =================
+        function renderMap(quizType) {
+            const container = d3.select('#map-container');
+            container.selectAll('*').remove(); 
+
+            const geoJson = quizType === 'deutschland' ? geoJsonDE : geoJsonBY;
+            const data = activeData;
+
+            const width = 600, height = 800;
+            const svg = container.append('svg')
+                .attr('id', 'dynamic-map')
+                .attr('viewBox', `0 0 ${width} ${height}`)
+                .attr('class', 'w-full h-auto max-h-[60vh] md:max-h-[70vh]');
+                
+            const projection = d3.geoMercator().fitExtent([[20, 20], [width - 20, height - 20]], geoJson);
+            const path = d3.geoPath().projection(projection);
+            
+            const statesGroup = svg.append('g').attr('id', 'states-group');
+            statesGroup.selectAll('path').data(geoJson.features).enter().append('path')
+                .attr('d', path).attr('class', 'state-path')
+                .attr('id', d => {
+                    const propString = Object.values(d.properties).join(" ").toLowerCase().replace(/[^a-zäöüß]/g, '');
+                    const state = data.find(s => {
+                        const sName = s.name.toLowerCase().replace(/[^a-zäöüß]/g, '');
+                        return propString.includes(sName);
+                    });
+                    return state ? state.id : 'unknown';
+                })
+                .on('click', function(event, d) {
+                    initAudio(); 
+                    const stateId = this.id;
+                    if (!stateId || stateId === 'unknown') return;
+
+                    if (currentDifficulty === 'lernen') {
+                        const stateObj = data.find(s => s.id === stateId);
+                        if (!stateObj) return;
+
+                        resetMap();
+                        if (lernenTimeout) clearTimeout(lernenTimeout);
+
+                        d3.select(this).classed('highlight-question', true);
+                        d3.select('#cap-' + stateId).classed('show', true);
+
+                        const qText = document.getElementById('question-text');
+                        const isBavaria = quizType === 'bayern';
+                        
+                        if (stateObj.isCityState) {
+                            qText.innerHTML = `Das ist <span class="text-sky-500">${stateObj.name}</span>, ein Stadtstaat.`;
+                        } else {
+                            const entity = isBavaria ? "Der Regierungsbezirk" : "Das Bundesland";
+                            qText.innerHTML = `${entity} ist <span class="text-sky-500">${stateObj.name}</span>.<br><span class="text-xl md:text-2xl text-slate-500 block mt-2">Die Hauptstadt heißt <span class="text-rose-500">${stateObj.capital}</span>.</span>`;
+                        }
+
+                        lernenTimeout = setTimeout(() => {
+                            resetMap();
+                            qText.innerText = `Klicke auf die Karte und erkunde sie!`;
+                        }, 4000);
+                        return;
+                    }
+
+                    if (currentDifficulty === 'mittel' && currentQuestion && currentQuestion.type === 'state' && isMapClickMode) {
+                        if (isWaitingForNext) return; 
+
+                        if (stateId === currentQuestion.stateObj.id) {
+                            isWaitingForNext = true;
+                            d3.select(this).classed('highlight-correct', true);
+                            isMapClickMode = false;
+                            handleCorrect();
+                        } else {
+                            d3.select(this).classed('highlight-wrong-click', true);
+                            playSound('wrong');
+                            if (!hasAttempted) {
+                                hasAttempted = true;
+                                document.getElementById('solution-button-container').classList.remove('hidden');
+                                showFeedback("Fast! Klicke auf ein anderes Land oder lass dir die Lösung zeigen.", "bg-[#fffbeb] text-[#b45309] border-2 border-[#fde68a]");
+                            }
+                        }
+                    }
+                });
+                
+            const capitalsGroup = svg.append('g').attr('id', 'capitals-group');
+            capitalsGroup.selectAll('circle').data(data).enter().append('circle')
+                .attr('id', d => 'cap-' + d.id)
+                .attr('class', 'capital-dot')
+                .attr('cx', d => projection(d.coords)[0])
+                .attr('cy', d => projection(d.coords)[1])
+                .attr('r', 6);
+        }
+
+        // ================= HILFSFUNKTIONEN =================
+        document.getElementById('text-answer').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') checkTextAnswer();
+        });
+
+        function showScreen(screenId) {
+            ['start-screen', 'mode-selection-screen', 'game-screen', 'result-screen'].forEach(id => document.getElementById(id).classList.add('hidden'));
+            document.getElementById(screenId).classList.remove('hidden');
+            if(screenId !== 'game-screen') resetMap();
+            if (lernenTimeout) clearTimeout(lernenTimeout);
+            window.scrollTo(0,0);
+        }
+
+        function shuffleArray(array) {
+            let arr = [...array];
+            for (let i = arr.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [arr[i], arr[j]] = [arr[j], arr[i]];
+            }
+            return arr;
+        }
+
+        function normalizeText(text) {
+            return text.trim().toLowerCase()
+                       .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+                       .replace(/[^a-z]/g, ''); 
+        }
+
+        function levenshtein(a, b) {
+            if (a.length === 0) return b.length;
+            if (b.length === 0) return a.length;
+            let matrix = [];
+            for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+            for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+            for (let i = 1; i <= b.length; i++) {
+                for (let j = 1; j <= a.length; j++) {
+                    if (b.charAt(i-1) === a.charAt(j-1)) {
+                        matrix[i][j] = matrix[i-1][j-1];
+                    } else {
+                        matrix[i][j] = Math.min(matrix[i-1][j-1] + 1, Math.min(matrix[i][j-1] + 1, matrix[i-1][j] + 1));
+                    }
+                }
+            }
+            return matrix[b.length][a.length];
+        }
+
+        function getHelperString(word) {
+            return word.split('').map(char => {
+                if (char === ' ') return '&nbsp;&nbsp;';
+                if (char === '-') return '-';
+                return '_';
+            }).join(' ');
+        }
+
+        function triggerReward() {
+            const emojis = ['🌟', '🚀', '🎉', '🏆', '⭐'];
+            const emoji = emojis[Math.floor(Math.random() * emojis.length)];
+            const messages = ["STARK!", "Wahnsinn!", "Genial!", "Super!", "On Fire! 🔥"];
+            const msg = messages[Math.floor(Math.random() * messages.length)];
+
+            const overlay = document.getElementById('reward-overlay');
+            const icon = document.getElementById('reward-icon');
+            const textEl = document.getElementById('reward-text');
+            
+            icon.innerText = emoji;
+            textEl.innerText = `${currentStreak} richtige am Stück,\n${msg}`;
+            overlay.classList.remove('hidden');
+            
+            icon.classList.remove('reward-anim');
+            textEl.classList.remove('reward-text-anim');
+            void icon.offsetWidth; 
+            icon.classList.add('reward-anim');
+            textEl.classList.add('reward-text-anim');
+            
+            setTimeout(() => { overlay.classList.add('hidden'); }, 2500);
+        }
+
+        // ================= SPIEL STEUERUNG =================
+        function showModeSelection(quizType, difficulty) {
+            initAudio(); 
+            tempQuizType = quizType;
+            tempDifficulty = difficulty;
+            if (difficulty === 'lernen') {
+                startGame('endlos'); 
+            } else {
+                showScreen('mode-selection-screen');
+            }
+        }
+
+        function startGame(gameMode) {
+            initAudio();
+            currentQuizType = tempQuizType;
+            currentDifficulty = tempDifficulty;
+            currentGameMode = gameMode;
+            
+            score = 0;
+            currentStreak = 0;
+            currentQuestionIndex = 0;
+            statePool = [];
+            capitalPool = [];
+            isMapClickMode = false;
+
+            if(solvedQuestions.size > 20) solvedQuestions.clear(); 
+
+            activeData = currentQuizType === 'deutschland' ? deData : byData;
+            
+            renderMap(currentQuizType);
+
+            const headerLeft = document.getElementById('header-left');
+            const headerRight = document.getElementById('header-right');
+            const endButton = document.getElementById('end-button');
+            const mcContainer = document.getElementById('multiple-choice-container');
+            const textContainer = document.getElementById('text-input-container');
+            const solutionBtn = document.getElementById('solution-button-container');
+            const qText = document.getElementById('question-text');
+            const pBarContainer = document.getElementById('progress-bar-container');
+
+            if (currentDifficulty === 'lernen') {
+                headerLeft.innerText = "Lern-Modus";
+                headerRight.classList.add('hidden');
+                pBarContainer.classList.add('hidden');
+                endButton.innerText = "Zurück";
+                mcContainer.classList.add('hidden');
+                textContainer.classList.add('hidden');
+                solutionBtn.classList.add('hidden');
+                resetFeedback();
+                qText.innerText = "Klicke auf die Karte und erkunde sie!";
+                showScreen('game-screen');
+                return;
+            } else {
+                headerLeft.innerHTML = 'Frage <span id="question-counter">1</span>';
+                headerRight.classList.remove('hidden');
+                endButton.innerText = "Beenden";
+                if(currentGameMode === 'schnell') {
+                    pBarContainer.classList.remove('hidden');
+                    document.getElementById('progress-bar').style.width = '0%';
+                } else {
+                    pBarContainer.classList.add('hidden');
+                }
+            }
+
+            document.getElementById('score').innerText = score;
+            updateStreakUI();
+            showScreen('game-screen');
+            loadNextQuestion();
+        }
+
+        function getNextQuestion() {
+            let type = (currentQuestionIndex % 2 === 0) ? 'state' : 'capital';
+
+            const fillPool = (isCapital) => {
+                let validItems = activeData;
+                if (isCapital) validItems = validItems.filter(s => !s.isCityState);
+                let unplayed = validItems.filter(s => !solvedQuestions.has(`${s.id}-${isCapital ? 'cap' : 'state'}`));
+                
+                if (unplayed.length === 0) {
+                    validItems.forEach(s => solvedQuestions.delete(`${s.id}-${isCapital ? 'cap' : 'state'}`));
+                    unplayed = validItems;
+                }
+                return shuffleArray(unplayed);
+            };
+
+            if (type === 'state') {
+                if (statePool.length === 0) statePool = fillPool(false);
+                return { stateObj: statePool.pop(), type: 'state' };
+            } else {
+                if (capitalPool.length === 0) capitalPool = fillPool(true);
+                return { stateObj: capitalPool.pop(), type: 'capital' };
+            }
+        }
+
+        function loadNextQuestion() {
+            if (currentGameMode === 'schnell' && currentQuestionIndex >= 12) {
+                endGame();
+                return;
+            }
+
+            isWaitingForNext = false;
+            hasAttempted = false; 
+            isMapClickMode = false;
+            currentQuestionIndex++;
+            currentQuestion = getNextQuestion();
+            
+            document.getElementById('question-counter').innerText = currentQuestionIndex;
+            
+            if(currentGameMode === 'schnell') {
+                document.getElementById('progress-bar').style.width = `${((currentQuestionIndex - 1) / 12) * 100}%`;
+            }
+
+            document.getElementById('solution-button-container').classList.add('hidden'); 
+            
+            resetMap();
+            resetFeedback();
+
+            const questionTextEl = document.getElementById('question-text');
+            const mcContainer = document.getElementById('multiple-choice-container');
+            const textContainer = document.getElementById('text-input-container');
+
+            const isBavaria = currentQuizType === 'bayern';
+            const entityWord = isBavaria ? "Regierungsbezirk" : "Bundesland";
+            const capitalWord = isBavaria ? "Hauptstadt" : "Hauptstadt";
+
+            if (currentQuestion.type === 'state') {
+                if (currentDifficulty === 'mittel') {
+                    isMapClickMode = true;
+                    questionTextEl.innerHTML = `Wo liegt <span class="text-sky-500 font-black">${currentQuestion.stateObj.name}</span>?<br><span class="text-xl text-slate-500">Tippe auf die Karte!</span>`;
+                    mcContainer.classList.add('hidden');
+                    textContainer.classList.add('hidden');
+                } else {
+                    document.getElementById(currentQuestion.stateObj.id).classList.add('highlight-question');
+                    questionTextEl.innerText = `Welcher ${entityWord} ist hier markiert?`;
+                }
+            } else {
+                let capDot = document.getElementById('cap-' + currentQuestion.stateObj.id);
+                capDot.classList.add('show');
+                document.getElementById(currentQuestion.stateObj.id).classList.add('highlight-hint');
+                
+                if (currentDifficulty === 'leicht') {
+                    questionTextEl.innerText = `Wie heißt die ${capitalWord} von ${currentQuestion.stateObj.name}?`;
+                } else {
+                    questionTextEl.innerText = `Wie heißt die rot blinkende ${capitalWord}?`;
+                }
+            }
+
+            if (currentDifficulty === 'schwer') {
+                mcContainer.classList.add('hidden');
+                textContainer.classList.remove('hidden');
+                
+                const correctWord = currentQuestion.type === 'state' ? currentQuestion.stateObj.name : currentQuestion.stateObj.capital;
+                document.getElementById('helper-text').innerHTML = getHelperString(correctWord);
+
+                let inputField = document.getElementById('text-answer');
+                inputField.value = "";
+                inputField.className = "w-full text-2xl p-4 border-4 border-slate-100 bg-slate-50 rounded-2xl focus:outline-none focus:border-sky-300 focus:bg-white text-center font-bold text-slate-700 transition-all";
+                setTimeout(() => inputField.focus(), 100);
+            } else if (!isMapClickMode) {
+                textContainer.classList.add('hidden');
+                mcContainer.classList.remove('hidden');
+                let numOptions = currentDifficulty === 'leicht' ? 4 : 6;
+                renderMultipleChoice(currentQuestion, numOptions);
+            }
+        }
+
+        function renderMultipleChoice(question, numOptions) {
+            const mcContainer = document.getElementById('multiple-choice-container');
+            mcContainer.innerHTML = '';
+            
+            let correctAnswer = question.type === 'state' ? question.stateObj.name : question.stateObj.capital;
+            
+            let wrongOptions = activeData.filter(s => s.id !== question.stateObj.id);
+            if (question.type === 'capital') {
+                wrongOptions = wrongOptions.filter(s => !s.isCityState);
+            }
+            
+            let wrongOptionStrings = wrongOptions.map(s => question.type === 'state' ? s.name : s.capital);
+            wrongOptionStrings = shuffleArray(wrongOptionStrings).slice(0, numOptions - 1);
+            
+            let allOptions = shuffleArray([correctAnswer, ...wrongOptionStrings]);
+            
+            mcContainer.className = numOptions === 6 ? "grid grid-cols-1 md:grid-cols-2 gap-3" : "grid grid-cols-1 md:grid-cols-2 gap-4";
+
+            allOptions.forEach(opt => {
+                let btn = document.createElement('button');
+                btn.className = `btn-hover bg-[#e0f2fe] hover:bg-[#bae6fd] text-[#0369a1] font-black py-4 px-4 rounded-2xl shadow-sm border-b-4 border-[#7dd3fc] ${numOptions === 6 ? 'text-lg md:text-xl' : 'text-xl md:text-2xl'}`;
+                btn.innerText = opt;
+                btn.onclick = () => checkMcAnswer(opt, correctAnswer, btn);
+                mcContainer.appendChild(btn);
+            });
+        }
+
+        // ================= AUSWERTUNG =================
+
+        function checkMcAnswer(selectedStr, correctStr, buttonElement) {
+            if (isWaitingForNext || buttonElement.disabled) return;
+
+            if (selectedStr === correctStr) {
+                isWaitingForNext = true;
+                buttonElement.className = "btn-hover bg-[#a7f3d0] text-[#064e3b] font-black py-4 px-4 rounded-2xl shadow-sm border-b-4 border-[#34d399] text-xl md:text-2xl";
+                handleCorrect();
+            } else {
+                playSound('wrong');
+                buttonElement.className = "bg-slate-200 text-slate-400 font-black py-4 px-4 rounded-2xl border-b-4 border-slate-300 text-xl md:text-2xl opacity-60 cursor-not-allowed";
+                buttonElement.disabled = true;
+
+                if (!hasAttempted) {
+                    hasAttempted = true;
+                    document.getElementById('solution-button-container').classList.remove('hidden');
+                    showFeedback("Fast! Probier es noch einmal oder schau dir die Lösung an.", "bg-[#fffbeb] text-[#b45309] border-2 border-[#fde68a]");
+                }
+            }
+        }
+
+        function checkTextAnswer() {
+            if (isWaitingForNext) return;
+            const inputField = document.getElementById('text-answer');
+            if(inputField.value.trim() === "") return; 
+            
+            const correctStr = currentQuestion.type === 'state' ? currentQuestion.stateObj.name : currentQuestion.stateObj.capital;
+            
+            const userNorm = normalizeText(inputField.value);
+            const correctNorm = normalizeText(correctStr);
+            const maxErrors = correctNorm.length <= 5 ? 1 : 2;
+            const distance = levenshtein(userNorm, correctNorm);
+
+            if (distance <= maxErrors) {
+                isWaitingForNext = true;
+                inputField.classList.add('bg-[#a7f3d0]', 'border-[#34d399]', 'text-[#064e3b]');
+                handleCorrect(distance > 0 ? correctStr : null);
+            } else {
+                playSound('wrong');
+                if (!hasAttempted) {
+                    hasAttempted = true;
+                    document.getElementById('solution-button-container').classList.remove('hidden');
+                    showFeedback("Nicht ganz richtig! Probier es noch einmal.", "bg-[#fffbeb] text-[#b45309] border-2 border-[#fde68a]");
+                }
+                
+                inputField.classList.add('bg-[#fecaca]', 'border-[#f87171]', 'text-[#7f1d1d]');
+                setTimeout(() => {
+                    inputField.classList.remove('bg-[#fecaca]', 'border-[#f87171]', 'text-[#7f1d1d]');
+                }, 800);
+            }
+        }
+
+        function showSolution() {
+            if (isWaitingForNext) return;
+            isWaitingForNext = true;
+            document.getElementById('solution-button-container').classList.add('hidden');
+            const correctStr = currentQuestion.type === 'state' ? currentQuestion.stateObj.name : currentQuestion.stateObj.capital;
+            handleWrong(correctStr);
+        }
+
+        function handleCorrect(typoCorrection = null) {
+            playSound('correct');
+            score++;
+            currentStreak++;
+            document.getElementById('score').innerText = score;
+            
+            solvedQuestions.add(`${currentQuestion.stateObj.id}-${currentQuestion.type === 'state' ? 'state' : 'cap'}`);
+            
+            let targetStreak = currentDifficulty === 'leicht' ? 2 : (currentDifficulty === 'mittel' ? 3 : 4);
+            if (currentStreak % targetStreak === 0 && currentStreak > 0) {
+                triggerReward(); 
+            }
+
+            updateStreakUI();
+            
+            let msg = typoCorrection ? `Richtig! (Genau: ${typoCorrection}) ✨` : "Klasse! Vollkommen richtig! 🎉";
+            showFeedback(msg, "bg-[#d1fae5] text-[#065f46] border-2 border-[#6ee7b7]");
+            
+            const stateEl = document.getElementById(currentQuestion.stateObj.id);
+            if (stateEl) {
+                stateEl.classList.remove('highlight-hint', 'highlight-question', 'highlight-wrong-click');
+                stateEl.classList.add('highlight-correct');
+            }
+
+            setTimeout(() => loadNextQuestion(), 1800);
+        }
+
+        function handleWrong(correctAnswer) {
+            currentStreak = 0; 
+            updateStreakUI();
+
+            showFeedback(`Die Lösung ist: ${correctAnswer}`, "bg-[#ffe4e6] text-[#9f1239] border-2 border-[#fda4af]");
+            
+            const stateEl = document.getElementById(currentQuestion.stateObj.id);
+            if (stateEl) {
+                if (isMapClickMode) {
+                    stateEl.classList.remove('highlight-wrong-click');
+                    stateEl.classList.add('highlight-correct'); 
+                } else {
+                    stateEl.classList.remove('highlight-hint', 'highlight-question');
+                    stateEl.classList.add('highlight-wrong');
+                }
+            }
+            
+            isMapClickMode = false;
+
+            setTimeout(() => loadNextQuestion(), 3000);
+        }
+
+        function updateStreakUI() {
+            const streakEl = document.getElementById('streak-indicator');
+            const streakCountEl = document.getElementById('streak-count');
+            if (currentStreak > 1 && currentDifficulty !== 'lernen') {
+                streakEl.classList.remove('hidden');
+                streakCountEl.innerText = currentStreak;
+            } else {
+                streakEl.classList.add('hidden');
+            }
+        }
+
+        function resetMap() {
+            document.querySelectorAll('.state-path').forEach(path => {
+                path.classList.remove('highlight-question', 'highlight-correct', 'highlight-wrong', 'highlight-hint', 'highlight-wrong-click');
+            });
+            document.querySelectorAll('.capital-dot').forEach(dot => {
+                dot.classList.remove('show');
+            });
+        }
+
+        function resetFeedback() {
+            const fbBox = document.getElementById('feedback-box');
+            fbBox.className = "hidden";
+            fbBox.innerText = "";
+        }
+
+        function showFeedback(msg, classes) {
+            const fbBox = document.getElementById('feedback-box');
+            fbBox.className = `mb-6 p-5 rounded-2xl text-center text-xl md:text-2xl font-black shadow-sm transition-all w-full ${classes}`;
+            fbBox.innerText = msg;
+            fbBox.classList.remove('hidden');
+        }
+
+        function endGame() {
+            if (currentDifficulty === 'lernen') {
+                showScreen('start-screen');
+                return;
+            }
+
+            showScreen('result-screen');
+            if(currentGameMode === 'schnell') document.getElementById('progress-bar').style.width = '100%';
+            document.getElementById('final-score').innerText = score;
+            
+            const msgEl = document.getElementById('result-message');
+            
+            if (score >= 10 && currentGameMode === 'schnell') {
+                msgEl.innerText = "Sensationell! Du bist ein echter Karten-Experte! 👑";
+            } else if (score > 15) {
+                msgEl.innerText = "Ein grandioser Marathon! 🌟";
+            } else {
+                msgEl.innerText = "Gutes Training! Übung macht den Meister! 💪";
+            }
+        }
+
+        // ================= LEGAL MODAL LOGIK =================
+        const legalModal = document.getElementById('legal-modal');
+        const legalTitle = document.getElementById('legal-modal-title');
+        const legalContent = document.getElementById('legal-modal-content');
+
+        const legalData = {
+            impressum: {
+                title: 'Impressum',
+                content: `<h3 class="font-bold text-lg mb-2">Angaben gemäß § 5 TMG</h3><p class="mb-4">Martin Geiger<br>Beratung digitale Bildung<br>Eduard-Ziegler-Str. 3<br>85221 Dachau</p>
+                          <h3 class="font-bold text-lg mb-2">Kontakt</h3><p class="mb-4">Telefon: 08131/741799<br>E-Mail: martin.geiger@ms-dachau-sued.de</p>
+                          <h3 class="font-bold text-lg mb-2">Redaktionell verantwortlich</h3><p class="mb-4">Martin Geiger<br>Eduard-Ziegler-Str. 3<br>85221 Dachau</p>
+                          <h3 class="font-bold text-lg mb-2 mt-6">Bild- & Quellennachweise</h3><ul class="list-disc pl-5 space-y-2 mb-4">
+                          <li><strong>Karten-Geodaten (GeoJSON):</strong> isellsoap/deutschlandGeoJSON (MIT Lizenz)</li>
+                          <li><strong>Karten-Render-Engine:</strong> D3.js (ISC Lizenz)</li>
+                          <li><strong>Icons:</strong> Lucide Icons (ISC Lizenz)</li>
+                          <li><strong>Flaggen-Vektoren:</strong> Wikimedia Commons (Public Domain)</li></ul>`
+            },
+            datenschutz: {
+                title: 'Datenschutzerklärung',
+                content: `<h3 class="font-bold text-lg mb-2">A) Datenschutz auf einen Blick</h3><p class="mb-4"><strong>Allgemeine Hinweise</strong><br>Die folgenden Hinweise geben einen einfachen Überblick darüber, was mit Ihren personenbezogenen Daten passiert, wenn Sie diese Website besuchen.</p>
+                          <h3 class="font-bold text-lg mb-2">B) Hosting & Externe Ressourcen</h3><p class="mb-4">Diese Website wird extern gehostet. Zur korrekten optischen Darstellung lädt die Seite zudem externe Design-Ressourcen (Tailwind CSS, jsdelivr für Kartendaten und unpkg für Icons). Bei der Verbindung zu diesen Servern wird technisch bedingt Ihre IP-Adresse an diese CDN-Anbieter übertragen.</p>
+                          <h3 class="font-bold text-lg mb-2">C) Anonymer Besucherzähler</h3><p class="mb-4">Ganz unten auf der Webseite befindet sich ein kleiner, rein visueller Seitenaufruf-Zähler des Open-Source Dienstes "hits.sh". Dieser zählt Aufrufe streng anonym und verzichtet komplett auf das Setzen von Cookies oder das Tracking von IP-Adressen.</p>`
+            }
+        };
+
+        window.openLegalModal = function(type) {
+            const data = legalData[type];
+            if(data) {
+                legalTitle.textContent = data.title;
+                legalContent.innerHTML = data.content;
+                legalModal.classList.remove('hidden'); 
+                document.body.style.overflow = 'hidden';
+            }
+        };
+
+        document.getElementById('close-legal-btn').addEventListener('click', () => { 
+            legalModal.classList.add('hidden'); 
+            document.body.style.overflow = ''; 
+        });
+        
+        legalModal.addEventListener('click', (e) => { 
+            if (e.target === legalModal) { 
+                legalModal.classList.add('hidden'); 
+                document.body.style.overflow = ''; 
+            }
+        });
+
+    </script>
+</body>
+</html>
