@@ -220,9 +220,15 @@
                             
                             <input type="text" id="text-answer" placeholder="Deine Antwort..." autocomplete="off"
                                    class="w-full text-2xl p-4 border-4 border-slate-100 bg-slate-50 rounded-2xl focus:outline-none focus:border-sky-300 focus:bg-white text-center font-bold text-slate-700 transition-all" style="-webkit-appearance: none;">
-                            <button onclick="checkTextAnswer()" class="btn-hover w-full bg-[#bae6fd] hover:bg-[#7dd3fc] text-[#0c4a6e] text-2xl font-black py-4 px-8 rounded-2xl shadow-sm border-b-4 border-[#38bdf8]">
-                                Antworten
-                            </button>
+                            
+                            <div class="flex w-full gap-3">
+                                <button id="hint-button" onclick="useHint()" class="btn-hover bg-[#fef08a] hover:bg-[#fde047] text-[#854d0e] text-2xl font-black py-4 px-6 rounded-2xl shadow-sm border-b-4 border-[#eab308] shrink-0">
+                                    Tipp
+                                </button>
+                                <button onclick="checkTextAnswer()" class="btn-hover w-full bg-[#bae6fd] hover:bg-[#7dd3fc] text-[#0c4a6e] text-2xl font-black py-4 px-8 rounded-2xl shadow-sm border-b-4 border-[#38bdf8]">
+                                    Antworten
+                                </button>
+                            </div>
                         </div>
 
                         <!-- Lösungs-Button -->
@@ -355,6 +361,8 @@
         let statePool = [];
         let capitalPool = [];
         let solvedQuestions = new Set(); 
+        let revealedIndices = [];
+        let currentCorrectWord = "";
 
         // --- AUDIO SYNTHESIZER ---
         let audioCtx = null;
@@ -396,12 +404,12 @@
                 const resRB = await fetch('https://cdn.jsdelivr.net/gh/isellsoap/deutschlandGeoJSON@main/3_regierungsbezirke/3_mittel.geo.json');
                 const geoJsonRB = await resRB.json();
                 
-                const byNames = byData.map(s => s.name);
+                const byNames = byData.map(s => s.name.toLowerCase().replace(/[^a-zäöüß]/g, ''));
                 geoJsonBY = {
                     type: "FeatureCollection",
                     features: geoJsonRB.features.filter(f => {
-                        const nameStr = String(f.properties.NAME_1 || f.properties.NAME_2 || f.properties.name || "");
-                        return byNames.some(n => nameStr.includes(n));
+                        const propStr = Object.values(f.properties).join(" ").toLowerCase().replace(/[^a-zäöüß]/g, '');
+                        return byNames.some(n => propStr.includes(n));
                     })
                 };
                 
@@ -433,11 +441,13 @@
             const path = d3.geoPath().projection(projection);
             
             const statesGroup = svg.append('g').attr('id', 'states-group');
+            const sortedData = [...data].sort((a, b) => b.name.length - a.name.length);
+            
             statesGroup.selectAll('path').data(geoJson.features).enter().append('path')
                 .attr('d', path).attr('class', 'state-path')
                 .attr('id', d => {
                     const propString = Object.values(d.properties).join(" ").toLowerCase().replace(/[^a-zäöüß]/g, '');
-                    const state = data.find(s => {
+                    const state = sortedData.find(s => {
                         const sName = s.name.toLowerCase().replace(/[^a-zäöüß]/g, '');
                         return propString.includes(sName);
                     });
@@ -486,6 +496,11 @@
                         } else {
                             d3.select(this).classed('highlight-wrong-click', true);
                             playSound('wrong');
+                            
+                            // NEU: Flammen sofort auf 0 setzen bei falschem Klick auf die Karte
+                            currentStreak = 0;
+                            updateStreakUI();
+                            
                             if (!hasAttempted) {
                                 hasAttempted = true;
                                 document.getElementById('solution-button-container').classList.remove('hidden');
@@ -550,12 +565,47 @@
             return matrix[b.length][a.length];
         }
 
-        function getHelperString(word) {
-            return word.split('').map(char => {
+        function getHelperString(word, revealed = []) {
+            return word.split('').map((char, idx) => {
                 if (char === ' ') return '&nbsp;&nbsp;';
                 if (char === '-') return '-';
+                if (revealed.includes(idx)) return char;
                 return '_';
             }).join(' ');
+        }
+        
+        function useHint() {
+            if (isWaitingForNext) return;
+            
+            // Stelle sicher, dass der erste Buchstabe aufgedeckt ist
+            if (!revealedIndices.includes(0)) revealedIndices.push(0);
+            
+            let unrevealed = [];
+            for (let i = 1; i < currentCorrectWord.length; i++) {
+                if (currentCorrectWord[i] !== ' ' && currentCorrectWord[i] !== '-' && !revealedIndices.includes(i)) {
+                    unrevealed.push(i);
+                }
+            }
+            
+            // 1-3 weitere Buchstaben verraten, abhängig von der Wortlänge
+            unrevealed = shuffleArray(unrevealed);
+            let numToReveal = Math.min(unrevealed.length, Math.max(1, Math.floor(currentCorrectWord.length / 4)));
+            
+            for (let i = 0; i < numToReveal; i++) {
+                revealedIndices.push(unrevealed[i]);
+            }
+            
+            document.getElementById('helper-text').innerHTML = getHelperString(currentCorrectWord, revealedIndices);
+            
+            // Tipp-Button deaktivieren
+            document.getElementById('hint-button').disabled = true;
+            document.getElementById('hint-button').classList.add('opacity-50', 'cursor-not-allowed');
+            
+            // Streak verlieren, da ein Tipp benutzt wurde
+            currentStreak = 0;
+            updateStreakUI();
+            
+            document.getElementById('text-answer').focus();
         }
 
         function triggerReward() {
@@ -652,7 +702,7 @@
         }
 
         function getNextQuestion() {
-            let type = (currentQuestionIndex % 2 === 0) ? 'state' : 'capital';
+            let type = (currentQuestionIndex % 2 !== 0) ? 'state' : 'capital';
 
             const fillPool = (isCapital) => {
                 let validItems = activeData;
@@ -705,6 +755,7 @@
             const isBavaria = currentQuizType === 'bayern';
             const entityWord = isBavaria ? "Regierungsbezirk" : "Bundesland";
             const capitalWord = isBavaria ? "Hauptstadt" : "Hauptstadt";
+            const article = isBavaria ? "Welcher" : "Welches";
 
             if (currentQuestion.type === 'state') {
                 if (currentDifficulty === 'mittel') {
@@ -714,7 +765,7 @@
                     textContainer.classList.add('hidden');
                 } else {
                     document.getElementById(currentQuestion.stateObj.id).classList.add('highlight-question');
-                    questionTextEl.innerText = `Welcher ${entityWord} ist hier markiert?`;
+                    questionTextEl.innerText = `${article} ${entityWord} ist hier markiert?`;
                 }
             } else {
                 let capDot = document.getElementById('cap-' + currentQuestion.stateObj.id);
@@ -732,8 +783,12 @@
                 mcContainer.classList.add('hidden');
                 textContainer.classList.remove('hidden');
                 
-                const correctWord = currentQuestion.type === 'state' ? currentQuestion.stateObj.name : currentQuestion.stateObj.capital;
-                document.getElementById('helper-text').innerHTML = getHelperString(correctWord);
+                currentCorrectWord = currentQuestion.type === 'state' ? currentQuestion.stateObj.name : currentQuestion.stateObj.capital;
+                revealedIndices = [];
+                document.getElementById('helper-text').innerHTML = getHelperString(currentCorrectWord, revealedIndices);
+                
+                document.getElementById('hint-button').disabled = false;
+                document.getElementById('hint-button').classList.remove('opacity-50', 'cursor-not-allowed');
 
                 let inputField = document.getElementById('text-answer');
                 inputField.value = "";
@@ -767,7 +822,8 @@
 
             allOptions.forEach(opt => {
                 let btn = document.createElement('button');
-                btn.className = `btn-hover bg-[#e0f2fe] hover:bg-[#bae6fd] text-[#0369a1] font-black py-4 px-4 rounded-2xl shadow-sm border-b-4 border-[#7dd3fc] ${numOptions === 6 ? 'text-lg md:text-xl' : 'text-xl md:text-2xl'}`;
+                // NEU: w-full, h-full, min-h, flex-Zentrierung und Text-Umbruch (whitespace-normal break-words)
+                btn.className = `btn-hover w-full h-full min-h-[5rem] flex items-center justify-center text-center whitespace-normal break-words leading-tight bg-[#e0f2fe] hover:bg-[#bae6fd] text-[#0369a1] font-black py-3 px-3 rounded-2xl shadow-sm border-b-4 border-[#7dd3fc] ${numOptions === 6 ? 'text-base md:text-lg' : 'text-lg md:text-xl'}`;
                 btn.innerText = opt;
                 btn.onclick = () => checkMcAnswer(opt, correctAnswer, btn);
                 mcContainer.appendChild(btn);
@@ -779,13 +835,20 @@
         function checkMcAnswer(selectedStr, correctStr, buttonElement) {
             if (isWaitingForNext || buttonElement.disabled) return;
 
+            // Damit die Buttons nach dem Klicken ihre Form und das Text-Wrapping behalten:
+            const numOptions = document.getElementById('multiple-choice-container').children.length;
+            const sizeClass = numOptions === 6 ? 'text-base md:text-lg' : 'text-lg md:text-xl';
+            const baseLayoutClass = `w-full h-full min-h-[5rem] flex items-center justify-center text-center whitespace-normal break-words leading-tight py-3 px-3 rounded-2xl border-b-4 ${sizeClass}`;
+
             if (selectedStr === correctStr) {
                 isWaitingForNext = true;
-                buttonElement.className = "btn-hover bg-[#a7f3d0] text-[#064e3b] font-black py-4 px-4 rounded-2xl shadow-sm border-b-4 border-[#34d399] text-xl md:text-2xl";
+                buttonElement.className = `btn-hover bg-[#a7f3d0] text-[#064e3b] font-black shadow-sm border-[#34d399] ${baseLayoutClass}`;
                 handleCorrect();
             } else {
+                currentStreak = 0; 
+                updateStreakUI();
                 playSound('wrong');
-                buttonElement.className = "bg-slate-200 text-slate-400 font-black py-4 px-4 rounded-2xl border-b-4 border-slate-300 text-xl md:text-2xl opacity-60 cursor-not-allowed";
+                buttonElement.className = `bg-slate-200 text-slate-400 font-black border-slate-300 opacity-60 cursor-not-allowed ${baseLayoutClass}`;
                 buttonElement.disabled = true;
 
                 if (!hasAttempted) {
@@ -813,7 +876,10 @@
                 inputField.classList.add('bg-[#a7f3d0]', 'border-[#34d399]', 'text-[#064e3b]');
                 handleCorrect(distance > 0 ? correctStr : null);
             } else {
+                currentStreak = 0; 
+                updateStreakUI();
                 playSound('wrong');
+                
                 if (!hasAttempted) {
                     hasAttempted = true;
                     document.getElementById('solution-button-container').classList.remove('hidden');
@@ -821,8 +887,11 @@
                 }
                 
                 inputField.classList.add('bg-[#fecaca]', 'border-[#f87171]', 'text-[#7f1d1d]');
+                inputField.value = ""; // Text sofort löschen
+                
                 setTimeout(() => {
                     inputField.classList.remove('bg-[#fecaca]', 'border-[#f87171]', 'text-[#7f1d1d]');
+                    inputField.focus(); // Fokus zurückholen
                 }, 800);
             }
         }
@@ -896,12 +965,9 @@
         }
 
         function resetMap() {
-            document.querySelectorAll('.state-path').forEach(path => {
-                path.classList.remove('highlight-question', 'highlight-correct', 'highlight-wrong', 'highlight-hint', 'highlight-wrong-click');
-            });
-            document.querySelectorAll('.capital-dot').forEach(dot => {
-                dot.classList.remove('show');
-            });
+            // D3 wird hier genutzt, um sicherzugehen, dass absolut alles gelöscht wird
+            d3.selectAll('.state-path').classed('highlight-question highlight-correct highlight-wrong highlight-hint highlight-wrong-click', false);
+            d3.selectAll('.capital-dot').classed('show', false);
         }
 
         function resetFeedback() {
