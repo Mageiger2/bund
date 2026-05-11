@@ -116,7 +116,7 @@
         <div id="start-screen" class="w-full max-w-5xl text-center bg-white rounded-3xl shadow-xl border border-slate-100 p-8 md:p-10">
             <h2 class="text-3xl md:text-4xl font-black text-sky-500 mb-2">Wähle deine Karte!</h2>
             <p class="text-lg md:text-xl text-slate-500 mb-8 font-bold">Klicke auf den Modus, den du spielen willst.</p>
-            
+
             <div id="start-cards" class="w-full flex flex-col md:flex-row gap-8 text-left">
                 <!-- Deutschland -->
                 <div class="flex-1 bg-sky-50 rounded-3xl p-6 md:p-8 shadow-sm border-2 border-sky-100 flex flex-col items-center text-center min-w-0">
@@ -556,7 +556,7 @@
 }
 ;
 
-        function initMaps() {
+       function initMaps() {
             // Wir nutzen direkt deine eingefügten, lokalen Daten!
             geoJsonDE = offlineGeoJsonDE;
             const geoJsonRB = offlineGeoJsonRB;
@@ -637,7 +637,9 @@
                         return;
                     }
 
-                    if (currentDifficulty === 'mittel' && currentQuestion && currentQuestion.type === 'state' && isMapClickMode) {
+                    if (currentQuestion && isMapClickMode &&
+                        ((currentDifficulty === 'mittel' && currentQuestion.type === 'state') ||
+                         (currentDifficulty === 'schwer' && currentQuestion.type === 'find-state-by-cap'))) {
                         if (isWaitingForNext) return; 
 
                         if (stateId === currentQuestion.stateObj.id) {
@@ -854,22 +856,30 @@
         }
 
         function getNextQuestion() {
-            // Index wechseln: Ungerade/Gerade -> State/Capital
-            let type = (currentQuestionIndex % 2 !== 0) ? 'state' : 'capital';
+            // Index wechseln: Ungerade/Gerade -> State/Capital oder neuer Schwer-Modus
+            let type;
+            if (currentDifficulty === 'schwer' && currentQuestionIndex % 2 === 0) {
+                type = 'find-state-by-cap';
+            } else {
+                type = (currentQuestionIndex % 2 !== 0) ? 'state' : 'capital';
+            }
 
             const fillPool = (isCapital) => {
                 let validItems = activeData;
                 if (isCapital) validItems = validItems.filter(s => !s.isCityState);
-                let unplayed = validItems.filter(s => !solvedQuestions.has(`${s.id}-${isCapital ? 'cap' : 'state'}`));
+                let unplayed = validItems.filter(s => !solvedQuestions.has(`${s.id}-${type}`));
                 
                 if (unplayed.length === 0) {
-                    validItems.forEach(s => solvedQuestions.delete(`${s.id}-${isCapital ? 'cap' : 'state'}`));
+                    validItems.forEach(s => solvedQuestions.delete(`${s.id}-${type}`));
                     unplayed = validItems;
                 }
                 return shuffleArray(unplayed);
             };
 
-            if (type === 'state') {
+            if (type === 'find-state-by-cap') {
+                if (capitalPool.length === 0) capitalPool = fillPool(true);
+                return { stateObj: capitalPool.pop(), type: 'find-state-by-cap' };
+            } else if (type === 'state') {
                 if (statePool.length === 0) statePool = fillPool(false);
                 return { stateObj: statePool.pop(), type: 'state' };
             } else {
@@ -910,7 +920,12 @@
             const capitalWord = isBavaria ? "Hauptstadt" : "Hauptstadt";
             const article = isBavaria ? "Welcher" : "Welches";
 
-            if (currentQuestion.type === 'state') {
+            if (currentQuestion.type === 'find-state-by-cap') {
+                isMapClickMode = true;
+                questionTextEl.innerHTML = `Tippe das ${entityWord} an, in dem die Stadt <span class="text-sky-500 font-black">${currentQuestion.stateObj.capital}</span> liegt!`;
+                mcContainer.classList.add('hidden');
+                textContainer.classList.add('hidden');
+            } else if (currentQuestion.type === 'state') {
                 if (currentDifficulty === 'mittel') {
                     isMapClickMode = true;
                     questionTextEl.innerHTML = `Wo liegt <span class="text-sky-500 font-black">${currentQuestion.stateObj.name}</span>?<br><span class="text-xl text-slate-500">Tippe auf die Karte!</span>`;
@@ -932,7 +947,7 @@
                 }
             }
 
-            if (currentDifficulty === 'schwer') {
+            if (currentDifficulty === 'schwer' && currentQuestion.type !== 'find-state-by-cap') {
                 mcContainer.classList.add('hidden');
                 textContainer.classList.remove('hidden');
                 
@@ -1053,7 +1068,7 @@
             if (isWaitingForNext) return;
             isWaitingForNext = true;
             document.getElementById('solution-button-container').classList.add('hidden');
-            const correctStr = currentQuestion.type === 'state' ? currentQuestion.stateObj.name : currentQuestion.stateObj.capital;
+            const correctStr = (currentQuestion.type === 'state' || currentQuestion.type === 'find-state-by-cap') ? currentQuestion.stateObj.name : currentQuestion.stateObj.capital;
             handleWrong(correctStr);
         }
 
@@ -1063,7 +1078,7 @@
             currentStreak++;
             document.getElementById('score').innerText = score;
             
-            solvedQuestions.add(`${currentQuestion.stateObj.id}-${currentQuestion.type === 'state' ? 'state' : 'cap'}`);
+            solvedQuestions.add(`${currentQuestion.stateObj.id}-${currentQuestion.type}`);
             
             let targetStreak = currentDifficulty === 'leicht' ? 2 : (currentDifficulty === 'mittel' ? 3 : 4);
             if (currentStreak % targetStreak === 0 && currentStreak > 0) {
